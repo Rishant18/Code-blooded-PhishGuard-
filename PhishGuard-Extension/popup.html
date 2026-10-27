@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhishGuard</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app" class="app-container">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-brand">
+        <div class="brand-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">PHISHGUARD</div>
+          <div class="brand-sub">SOC Workstation</div>
+        </div>
+      </div>
+      <div class="header-status">
+        <span id="status-dot" class="status-dot checking"></span>
+        <span id="status-text" class="status-text">Checking...</span>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="scan">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        Triage
+      </button>
+      <button class="tab-btn" data-tab="result">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+        Analysis
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+        Settings
+      </button>
+    </nav>
+
+    <!-- SCAN TAB -->
+    <div id="tab-scan" class="tab-content active">
+
+      <!-- 1-Click Instant Active Tab Scan -->
+      <div class="instant-detect-box" id="instant-detect-box">
+        <div class="detect-header">
+          <div class="detect-pulse-ring"></div>
+          <div class="detect-title-wrap">
+            <div class="detect-title">Auto-Detect Active Email</div>
+            <div class="detect-sub" id="detect-sub">Scanning open browser tab...</div>
+          </div>
+        </div>
+        <button id="instant-scan-btn" class="instant-scan-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <polyline points="9 12 11 14 15 10"/>
+          </svg>
+          <span id="instant-scan-text">Scan Open Email Now</span>
+        </button>
+      </div>
+
+      <!-- Quick Demo Samples -->
+      <div class="section-label">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+        </svg>
+        DEMO ATTACK VECTORS
+      </div>
+      <div class="demo-chips">
+        <button class="demo-chip" data-sample="quarantine">
+          <span class="chip-dot danger"></span>
+          Payroll Harvest
+        </button>
+        <button class="demo-chip" data-sample="review">
+          <span class="chip-dot warning"></span>
+          Vendor Invoice
+        </button>
+        <button class="demo-chip" data-sample="allow">
+          <span class="chip-dot safe"></span>
+          Town Hall
+        </button>
+      </div>
+
+      <!-- Manual Input Accordion / Fallback -->
+      <div class="manual-input-section">
+        <div class="manual-toggle-header" id="manual-toggle-btn">
+          <span class="section-label" style="margin:0;">OR INSPECT CUSTOM TEXT / RAW EML</span>
+          <span class="manual-toggle-icon" id="manual-toggle-icon">+</span>
+        </div>
+        <div class="manual-body hidden" id="manual-body">
+          <div class="input-wrapper">
+            <textarea id="email-input" class="email-textarea" placeholder="Paste raw RFC 822 or email text here..."></textarea>
+            <div class="char-count" id="char-count">0 chars</div>
+          </div>
+          <button id="scan-btn" class="scan-button" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            <span id="scan-btn-text">RUN CUSTOM TRIAGE</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RESULT TAB -->
+    <div id="tab-result" class="tab-content">
+      <div id="result-empty" class="empty-state">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--cyan-400); opacity: 0.6;">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+        </svg>
+        <p>No email analyzed yet.</p>
+        <p class="hint">Click <strong>"Scan Open Email Now"</strong> on the Triage tab or right-click any email text.</p>
+      </div>
+      <div id="result-panel" class="result-panel hidden"></div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div id="tab-settings" class="tab-content">
+      <div class="settings-group">
+        <label class="settings-label">PhishGuard Backend API</label>
+        <input id="api-url-input" type="text" class="settings-input" placeholder="http://127.0.0.1:8000" />
+        <p class="settings-hint">Endpoint for full Rules + ML TF-IDF + Intel hybrid engine.</p>
+      </div>
+      <button id="save-settings-btn" class="settings-save-btn">Save Configuration</button>
+      <div id="settings-toast" class="settings-toast hidden">Settings successfully saved!</div>
+
+      <div class="settings-info">
+        <div class="info-title">How Automatic Scanning Works</div>
+        <ul class="info-list">
+          <li><strong>Direct Webmail Toolbar</strong>: Opening emails in Gmail or Outlook injects a real-time PhishGuard scan bar at the top of the message.</li>
+          <li><strong>1-Click Instant Scan</strong>: Open the extension on any tab containing an email and click <strong>"Scan Open Email Now"</strong> — zero copy-pasting required.</li>
+          <li><strong>Right-Click Context Menu</strong>: Highlight any snippet → <em>"Scan with PhishGuard"</em>.</li>
+          <li><strong>Offline Failover</strong>: Works locally with full heuristic rules and threat intelligence when backend is offline.</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
