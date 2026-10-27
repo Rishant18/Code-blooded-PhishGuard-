@@ -1,0 +1,61 @@
+label,subject,body
+phishing,Urgent account verification,Your account will be suspended today. Verify your password immediately at http://secure-login.invalid to restore access.
+phishing,Mailbox quota exceeded,Your mailbox is full. Sign in now at http://mailbox-check.invalid and enter your credentials to avoid losing messages.
+phishing,Invoice payment overdue,Payment is overdue. Open the attached payment portal at http://billing-update.invalid and submit your bank details today.
+phishing,Password expires today,Your password expires in 2 hours. Confirm your login details at http://account-verify.invalid or your account will be locked.
+phishing,Unusual sign-in detected,We detected unusual activity. Verify your identity and one-time password using this link: http://security-check.invalid.
+phishing,Package delivery fee,Your parcel is on hold. Pay the small delivery fee at http://parcel-fee.invalid immediately to schedule delivery.
+phishing,Payroll review required,Payroll needs you to sign in and confirm your bank account information at http://payroll-review.invalid before end of day.
+phishing,Final warning,Final warning: your account access will be terminated. Click http://restore-access.invalid and enter your password now.
+phishing,Shared document notification,A confidential document was shared with you. Sign in to view it at http://docs-auth.invalid using your work credentials.
+phishing,Tax refund pending,Your tax refund is pending. Submit your bank details and identity number at http://refund-claim.invalid to receive payment.
+phishing,Security alert,Your email account is at risk. Confirm your password and OTP at http://email-protect.invalid within 30 minutes.
+phishing,Cloud storage disabled,Your cloud files will be deleted unless you renew access at http://storage-renew.invalid and enter your payment details.
+phishing,Gift card request,Please buy gift cards urgently and send me the codes. Do not call because I am in a meeting.
+phishing,Bank transfer required,The vendor changed bank details. Wire transfer the invoice to this new account immediately and keep it confidential.
+phishing,Account locked,Your account has been locked due to unusual activity. Click http://unlock-account.invalid to verify your identity.
+phishing,Benefits confirmation,Confirm your employee benefits by signing in at http://hr-benefits.invalid with your username and password.
+phishing,Voicemail available,You have a secure voicemail. Sign in at http://voice-message.invalid to listen and verify your email account.
+phishing,Document signature needed,A signature is required today. Open http://sign-docs.invalid and enter your company login to review the document.
+phishing,Payment method failed,Your payment method failed. Update your card and billing information at http://payment-fix.invalid to prevent cancellation.
+phishing,Lottery prize,You have won a large prize. Pay the processing fee and provide your bank account details to claim it.
+phishing,MFA reset,Your multi-factor authentication is being reset. Reply with the verification code you just received to keep access.
+phishing,IT support request,IT support needs your password to repair your workstation. Reply immediately with your current password.
+phishing,Delivery address issue,We cannot deliver your package. Confirm your address and pay a fee at http://delivery-confirm.invalid today.
+phishing,Remote access invitation,Install this urgent security update from http://patch-download.invalid and sign in with your company credentials.
+phishing,CEO confidential request,I need you to process a confidential wire transfer now. Keep this request secret and do not verify by phone.
+phishing,Subscription cancellation,Your subscription will be cancelled today. Update your payment card at http://billing-alert.invalid to continue.
+phishing,Shared spreadsheet,The finance team shared a spreadsheet. Sign in again at http://office-login.invalid to view the file.
+phishing,Benefits suspended,Your benefits are suspended pending identity verification. Enter your national ID and password at http://benefits-check.invalid.
+phishing,Refund processing,"A refund is waiting. Confirm your card number, expiry date, and security code at http://refund-process.invalid."
+phishing,Webmail account closure,Your webmail account is scheduled for closure. Verify your account immediately at http://webmail-restore.invalid.
+legitimate,Meeting agenda for Thursday,"Hi team, attached is the agenda for Thursday meeting. Please add topics by Wednesday afternoon."
+legitimate,Project status update,The project is on track. The design review is scheduled for 2 PM tomorrow in conference room B.
+legitimate,Receipt for your purchase,Thank you for your purchase. Your receipt is attached for your records. Contact support through our usual website if you have questions.
+legitimate,Lunch plans,Are you available for lunch next Tuesday? I can book a table near the office.
+legitimate,Weekly engineering notes,The weekly engineering notes are ready in the shared team folder. No action is required unless you have edits.
+legitimate,Appointment reminder,This is a reminder of your appointment on Friday at 10 AM. Please call the clinic using the number on your existing appointment card if you need to reschedule.
+legitimate,Course schedule published,The updated course schedule is available on the university portal you normally use. Classes begin Monday.
+legitimate,Shipping confirmation,Your order has shipped. You can view tracking by opening the retailer app directly and checking your order history.
+legitimate,Team celebration,Congratulations on completing the release. We will have a short team celebration after the retrospective.
+legitimate,Document review comments,I added comments to the draft. Please review them when you have time and let me know if anything is unclear.
+legitimate,Monthly statement available,Your monthly statement is available in the banking app. Open the app directly to review your transactions.
+legitimate,Library book reminder,The library book is due next week. You can renew it from your library account if no one else has requested it.
+legitimate,Office maintenance notice,Facilities will inspect the air conditioning on Saturday morning. The work should not affect weekday operations.
+legitimate,Volunteer event details,Thanks for volunteering. We will meet at the community centre at 9 AM on Saturday.
+legitimate,Team lunch poll,Please fill in the team lunch poll by Friday so we can choose a suitable restaurant.
+legitimate,Software release notes,Version 2.4 includes performance fixes and improved accessibility. Read the release notes in the internal documentation.
+legitimate,Invoice received,We received your invoice and forwarded it to accounts payable. The standard payment process will apply.
+legitimate,Travel itinerary,Your travel itinerary is attached. Please review the flight times and contact the travel desk through the usual company channel for changes.
+legitimate,Password manager reminder,Remember to use the company password manager for storing unique passwords. IT documentation is available on the intranet.
+legitimate,School event announcement,The school science fair will be held on Friday. Families are welcome to attend between 1 PM and 4 PM.
+legitimate,Team calendar invitation,I sent a calendar invitation for the planning meeting. Please decline if the time conflicts with your schedule.
+legitimate,Customer feedback summary,The customer feedback summary is ready. Main themes include faster onboarding and clearer help documentation.
+legitimate,Benefits information session,HR will host an optional benefits information session next week. Details are posted on the employee intranet.
+legitimate,Delivery completed,"Your package was delivered. If you did not receive it, check the delivery details in the retailer app."
+legitimate,Backup completed,The scheduled backup completed successfully. No action is required.
+legitimate,Conference registration,Your conference registration is confirmed. Your ticket is available in your attendee account.
+legitimate,Quarterly report draft,Please review the draft quarterly report and send any edits before Monday afternoon.
+legitimate,Appointment confirmed,Your appointment is confirmed for 11 AM. Please arrive ten minutes early and bring your appointment card.
+legitimate,Maintenance window,The service maintenance window is scheduled for Sunday from 1 AM to 2 AM. No response is needed.
+legitimate,New colleague introduction,Please welcome our new colleague to the team. Their first week schedule is available on the shared calendar.
