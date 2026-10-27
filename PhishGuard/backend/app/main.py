@@ -8,35 +8,42 @@ from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app.ml_detector import predict_email, train_model
+from app.ml_detector import predict_email, load_model
+from app.reputation import evaluate_reputation, extract_domain
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "phishguard.db"
 
 app = FastAPI(
     title="PhishGuard API",
-    description="Explainable email triage prototype. Results are heuristic and advisory.",
-    version="0.1.0",
+    description="Explainable email triage backend: Rules + ML + Reputation with human-in-the-loop analyst audit trail.",
+    version="0.2.2",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["*"],
     allow_credentials=False,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 class AnalyseRequest(BaseModel):
     email_text: str = Field(min_length=5, max_length=200_000)
+
+
+class AnalystActionRequest(BaseModel):
+    action: Literal["ALLOW", "REVIEW", "QUARANTINE"]
+    notes: str = Field(default="", max_length=1000)
+    analyst_name: str = Field(default="Analyst-1", max_length=100)
 
 
 def connect_db() -> sqlite3.Connection:
@@ -54,21 +61,40 @@ def init_db() -> None:
                 sender TEXT,
                 subject TEXT,
                 risk_score INTEGER NOT NULL,
-                verdict TEXT NOT NULL,
+                rule_score INTEGER NOT NULL DEFAULT 0,
+                ml_score INTEGER NOT NULL DEFAULT 0,
+                reputation_score INTEGER NOT NULL DEFAULT 0,
+                recommended_action TEXT NOT NULL,
+                analyst_action TEXT,
+                analyst_notes TEXT,
+                action_timestamp TEXT,
+                analyst_name TEXT,
                 indicators_json TEXT NOT NULL,
                 email_excerpt TEXT NOT NULL
             )
         """)
+        existing_cols = [col[1] for col in conn.execute("PRAGMA table_info(analyses)").fetchall()]
+        for col, col_type in [
+            ("rule_score", "INTEGER NOT NULL DEFAULT 0"),
+            ("ml_score", "INTEGER NOT NULL DEFAULT 0"),
+            ("reputation_score", "INTEGER NOT NULL DEFAULT 0"),
+            ("recommended_action", "TEXT DEFAULT 'REVIEW'"),
+            ("analyst_action", "TEXT"),
+            ("analyst_notes", "TEXT"),
+            ("action_timestamp", "TEXT"),
+            ("analyst_name", "TEXT"),
+        ]:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE analyses ADD COLUMN {col} {col_type}")
 
 
 @app.on_event("startup")
 def startup() -> None:
     init_db()
-    train_model()
+    load_model()
 
 
 def parse_email_text(raw: str) -> dict[str, str]:
-    # Parse standard headers when present; pasted plain text is also supported.
     msg = email.message_from_string(raw, policy=policy.default)
     sender = str(msg.get("From", "")).strip()
     subject = str(msg.get("Subject", "")).strip()
@@ -90,7 +116,6 @@ def parse_email_text(raw: str) -> dict[str, str]:
         except Exception:
             body = raw
 
-    # For plain text without parseable mail headers, analyse the full text.
     if not body.strip() or (not sender and not subject):
         body = raw
 
@@ -104,27 +129,21 @@ def extract_urls(text: str) -> list[str]:
         url = item.rstrip(".,;:!?")
         if url not in cleaned:
             cleaned.append(url)
-    return cleaned[:100]
-
-
-def host_from_url(url: str) -> str:
-    candidate = url if url.lower().startswith(("http://", "https://")) else "http://" + url
-    try:
-        return (urlparse(candidate).hostname or "").lower()
-    except ValueError:
-        return ""
+    return cleaned[:50]
 
 
 def analyse(raw: str) -> dict[str, Any]:
     parsed = parse_email_text(raw)
-    text = f"{parsed['subject']}\n{parsed['body']}\n{parsed['raw']}".lower()
+    full_text = f"{parsed['subject']}\n{parsed['body']}\n{parsed['raw']}".lower()
     urls = extract_urls(parsed["body"] + "\n" + parsed["raw"])
-    indicators: list[dict[str, Any]] = []
-    score = 0
 
-    def add(key: str, title: str, severity: str, points: int, evidence: str, explanation: str) -> None:
-        nonlocal score
-        indicators.append({
+    rule_indicators: list[dict[str, Any]] = []
+    rule_points = 0
+
+    def add_rule(key: str, title: str, severity: str, points: int, evidence: str, explanation: str) -> None:
+        nonlocal rule_points
+        rule_indicators.append({
+            "pillar": "Rules",
             "key": key,
             "title": title,
             "severity": severity,
@@ -132,130 +151,155 @@ def analyse(raw: str) -> dict[str, Any]:
             "evidence": evidence,
             "explanation": explanation,
         })
-        score += points
+        rule_points += points
 
-    urgency_terms = [
-        "urgent", "immediately", "act now", "within 24 hours", "account suspended",
-        "verify your account", "unusual activity", "final warning", "limited time",
-    ]
-    matched_urgency = next((term for term in urgency_terms if term in text), None)
-    if matched_urgency:
-        add(
-            "urgency", "Urgent or pressure-based language", "medium", 18,
-            f"Matched phrase: “{matched_urgency}”",
-            "Pressure language can be used to rush a recipient into acting before checking a message.",
+    # --- 1. Broadened Urgency Heuristic ---
+    urgency_pattern = (
+        r"(?i)\b(urgent|immediately|act now|action required|promptly|by the end of the day|"
+        r"within \d+ (?:hours?|days?)|account (?:will be )?suspended|disabled|unusual activity|"
+        r"final notice|final warning|limited time|expire(?:s|d)? today|avoid interruption|"
+        r"prevent unauthorized access|reserve your slot)\b"
+    )
+    urgency_match = re.search(urgency_pattern, full_text)
+    if urgency_match:
+        add_rule(
+            "urgency", "Urgent or pressure-driven call-to-action", "medium", 25,
+            f"Matched phrase: “{urgency_match.group(0)}”",
+            "Call-to-action urgency pressures recipients to react quickly without independent verification.",
         )
 
-    credential_terms = ["password", "login", "sign in", "verify your identity", "credentials", "one-time password", "otp"]
-    matched_credential = next((term for term in credential_terms if term in text), None)
-    if matched_credential:
-        add(
-            "credentials", "Credential-related request", "medium", 20,
-            f"Matched term: “{matched_credential}”",
-            "Requests involving credentials or identity verification deserve careful review, especially when paired with links.",
+    # --- 2. Broadened Credential & Personal Data Harvesting Heuristic ---
+    harvest_pattern = (
+        r"(?i)\b(password|passcode|login|log in|sign[ -]in|verify your identity|confirm your credentials|"
+        r"credentials|one-time password|otp|restore your permissions|confirm (?:your )?security settings|"
+        r"confirm (?:your )?account settings|candidate information form|candidate details|registration form)\b"
+    )
+    harvest_match = re.search(harvest_pattern, full_text)
+    if harvest_match:
+        add_rule(
+            "harvesting", "Credential or personal data harvesting solicitation", "high", 30,
+            f"Matched term: “{harvest_match.group(0)}”",
+            "Direct solicitation of user credentials, personal registration data, or security configurations.",
         )
 
-    if urls:
-        add(
-            "links", "Contains web links", "low", min(12, 4 + len(urls) * 2),
-            f"{len(urls)} URL(s) found: " + ", ".join(urls[:3]),
-            "Links are not inherently malicious. Check the destination and whether it matches the claimed sender before visiting.",
+    # --- 3. Broadened Financial & Impersonation Lure Heuristic ---
+    financial_pattern = (
+        r"(?i)\b(gift card|wire transfer|payment overdue|bank(?:ing)? (?:details|information)|"
+        r"update billing|direct deposit|salary payment|payroll profile|synchronization (?:has been )?paused|"
+        r"storage limit reached|quota exhausted)\b"
+    )
+    fin_match = re.search(financial_pattern, full_text)
+    if fin_match:
+        add_rule(
+            "lure_pattern", "Resource interruption or financial diversion lure", "high", 30,
+            f"Matched term: “{fin_match.group(0)}”",
+            "Simulates system service interruption, cloud quota suspension, or banking modifications.",
         )
 
-    suspicious_url_findings = []
-    for url in urls:
-        host = host_from_url(url)
-        if not host:
-            continue
-        reasons = []
-        if host.startswith("xn--") or ".xn--" in host:
-            reasons.append("internationalized/punycode hostname")
-        if re.match(r"^\d{1,3}(?:\.\d{1,3}){3}$", host):
-            reasons.append("IP-address hostname")
-        if len(host) > 45:
-            reasons.append("unusually long hostname")
-        if host.count("-") >= 3:
-            reasons.append("multiple hyphens in hostname")
-        if reasons:
-            suspicious_url_findings.append(f"{host}: {', '.join(reasons)}")
-    if suspicious_url_findings:
-        add(
-            "url_shape", "Potentially unusual URL structure", "high", 24,
-            "; ".join(suspicious_url_findings[:3]),
-            "Some phishing links use unusual hostnames. This is a structural warning, not proof that a URL is malicious.",
-        )
+    # --- 4. Sender vs Link Domain Mismatch Check ---
+    sender_domain = extract_domain(parsed["sender"]) if parsed["sender"] else ""
+    url_domains = [extract_domain(u) for u in urls if extract_domain(u)]
 
-    if re.search(r"(?i)\b(?:gift card|wire transfer|payment overdue|bank details|update payment)\b", text):
-        match = re.search(r"(?i)\b(?:gift card|wire transfer|payment overdue|bank details|update payment)\b", text)
-        add(
-            "payment", "Payment or financial pressure", "medium", 18,
-            f"Matched phrase: “{match.group(0)}”",
-            "Unexpected payment instructions or requests for financial details should be verified through a separate trusted channel.",
-        )
-
-    if parsed["sender"]:
-        sender_host_match = re.search(r"@([A-Za-z0-9.-]+\.[A-Za-z]{2,})", parsed["sender"])
-        sender_host = sender_host_match.group(1).lower() if sender_host_match else ""
-        link_hosts = [host_from_url(url) for url in urls]
-        link_hosts = [host for host in link_hosts if host]
-        if sender_host and link_hosts and not any(
-            host == sender_host or host.endswith("." + sender_host) or sender_host.endswith("." + host)
-            for host in link_hosts
-        ):
-            add(
-                "sender_link_mismatch", "Sender and link domains differ", "medium", 18,
-                f"Sender domain: {sender_host}; link domain(s): {', '.join(link_hosts[:3])}",
-                "A mismatch can be legitimate, but it is worth checking whether the link belongs to the organisation the email claims to represent.",
+    if sender_domain and url_domains:
+        mismatched = [d for d in url_domains if not (d == sender_domain or d.endswith("." + sender_domain) or sender_domain.endswith("." + d))]
+        if mismatched:
+            add_rule(
+                "domain_mismatch", "Sender and destination domain mismatch", "high", 30,
+                f"Sender domain '{sender_domain}' differs from destination '{mismatched[0]}'",
+                "The email originates from one organization domain while redirecting users to an external host.",
             )
 
-       # Preserve the rule score and add an experimental ML estimate. The combined
-    # score is a transparent blend, not a calibrated probability.
-    rule_score = min(100, score)
+    # --- 5. Insecure HTTP Link Check ---
+    insecure_urls = [u for u in urls if u.lower().startswith("http://")]
+    if insecure_urls:
+        add_rule(
+            "insecure_transport", "Unencrypted HTTP destination link", "medium", 20,
+            f"Insecure link found: {insecure_urls[0]}",
+            "Modern enterprise platforms enforce HTTPS. Plain HTTP links requesting actions indicate malicious intent.",
+        )
+
+    rule_score = min(100, rule_points)
+
+    # --- Pillar 2: ML Model Inference ---
     ml_result = predict_email(parsed["subject"], parsed["body"] or parsed["raw"])
+    ml_score = ml_result["phishing_probability"]
 
-    combined_score = round(
-        0.55 * ml_result["phishing_probability"]
-        + 0.45 * rule_score
+    # --- Pillar 3: Reputation & Threat Intel ---
+    rep_result = evaluate_reputation(sender_domain, urls)
+    reputation_score = rep_result["reputation_score"]
+
+    # Dynamic Weighting Blend:
+    if reputation_score > 0:
+        hybrid_score = round((0.35 * rule_score) + (0.35 * ml_score) + (0.30 * reputation_score))
+    else:
+        # Rules and ML share equal weight when no reputation intel is available
+        hybrid_score = round((0.50 * rule_score) + (0.50 * ml_score))
+
+    # --- Escalation Logic ---
+    if reputation_score >= 50:
+        hybrid_score = max(hybrid_score, 80)
+
+    # High-confidence multi-heuristic escalation:
+    # Domain mismatch combined with harvesting, urgency, or insecure links
+    critical_rules = [ind["key"] for ind in rule_indicators]
+    if "domain_mismatch" in critical_rules and ("harvesting" in critical_rules or "lure_pattern" in critical_rules):
+        hybrid_score = max(hybrid_score, 74)
+
+    if len(rule_indicators) >= 3 and rule_score >= 55:
+        hybrid_score = max(hybrid_score, 72)
+
+    final_score = min(100, max(0, hybrid_score))
+
+    if final_score >= 60:
+        action = "QUARANTINE"
+        verdict = "High Risk"
+    elif final_score >= 25:
+        action = "REVIEW"
+        verdict = "Needs Review"
+    else:
+        action = "ALLOW"
+        verdict = "Lower Risk"
+
+    all_indicators = list(rule_indicators)
+    for ind in rep_result["indicators"]:
+        all_indicators.append({
+            "pillar": "Reputation",
+            "key": ind["source"],
+            "title": f"Threat Intel: {ind['source']}",
+            "severity": ind["severity"],
+            "points": ind["impact"],
+            "evidence": ind["finding"],
+            "explanation": "Signal flagged from domain heuristics or threat intelligence blocklist.",
+        })
+
+    summary = (
+        f"Assigned {action} with overall risk score {final_score}/100. "
+        f"Signals: Rules ({rule_score}), ML Model ({ml_score}), Threat-Intel ({reputation_score})."
     )
-
-    # Escalate emails with multiple independent warning indicators.
-    if len(indicators) >= 3 and rule_score >= 40:
-        combined_score = max(combined_score, 60)
-
-    score = min(100, combined_score)
-
-    if score >= 60:
-        verdict, action = "High risk", "Quarantine"
-    elif score >= 25:
-        verdict, action = "Needs review", "Review"
-    else:
-        verdict, action = "Lower risk", "Allow"
-
-    if not indicators:
-        summary = "No configured warning rules were triggered. Review the ML estimate too; absence of rule matches does not establish safety."
-    else:
-        summary = f"{len(indicators)} rule indicator(s) were triggered. The overall score also incorporates the experimental ML estimate. Review the evidence before taking action."
 
     return {
         "sender": parsed["sender"] or "Not identified",
         "subject": parsed["subject"] or "No subject detected",
-        "risk_score": score,
-        "rule_score": rule_score,
-        "ml": ml_result,
+        "risk_score": final_score,
+        "score_breakdown": {
+            "rules": rule_score,
+            "ml": ml_score,
+            "reputation": reputation_score,
+        },
         "verdict": verdict,
         "recommended_action": action,
         "summary": summary,
-        "indicators": indicators,
+        "indicators": all_indicators,
+        "ml_explainability": {
+            "prediction": ml_result["prediction"],
+            "top_features": ml_result.get("top_features", []),
+        },
+        "threat_intel": {
+            "checked_domains": rep_result["checked_domains"],
+            "intel_verdict": rep_result["intel_verdict"],
+        },
         "urls": urls,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "method": "TF-IDF + Logistic Regression with rule-based indicators",
-        "limitations": [
-            "This is a heuristic prototype, not a guarantee of safety or maliciousness.",
-            "The current version does not query external threat-intelligence services.",
-            "The ML model is trained on bundled synthetic demonstration examples and has not been validated for real-world accuracy.",
-            "The combined score is an experimental blend, not a calibrated probability.",
-            "No links are opened and no attachments are executed.",
-        ],
     }
 
 
@@ -263,12 +307,20 @@ def save_result(result: dict[str, Any], raw: str) -> int:
     with connect_db() as conn:
         cur = conn.execute(
             """INSERT INTO analyses
-               (created_at, sender, subject, risk_score, verdict, indicators_json, email_excerpt)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               (created_at, sender, subject, risk_score, rule_score, ml_score, reputation_score,
+                recommended_action, indicators_json, email_excerpt)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                result["created_at"], result["sender"], result["subject"],
-                result["risk_score"], result["verdict"],
-                json.dumps(result["indicators"]), raw[:500],
+                result["created_at"],
+                result["sender"],
+                result["subject"],
+                result["risk_score"],
+                result["score_breakdown"]["rules"],
+                result["score_breakdown"]["ml"],
+                result["score_breakdown"]["reputation"],
+                result["recommended_action"],
+                json.dumps(result["indicators"]),
+                raw[:500],
             ),
         )
         return int(cur.lastrowid)
@@ -276,7 +328,7 @@ def save_result(result: dict[str, Any], raw: str) -> int:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "PhishGuard API"}
+    return {"status": "ok", "service": "PhishGuard Explainable Triage API"}
 
 
 @app.post("/api/analyse")
@@ -289,10 +341,10 @@ def analyse_text(payload: AnalyseRequest) -> dict[str, Any]:
 @app.post("/api/analyse-file")
 async def analyse_file(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename or not file.filename.lower().endswith(".eml"):
-        raise HTTPException(status_code=400, detail="Please upload an .eml file.")
+        raise HTTPException(status_code=400, detail="Please upload a valid .eml file.")
     content = await file.read(1_000_001)
     if len(content) > 1_000_000:
-        raise HTTPException(status_code=413, detail="File is too large. Maximum size is 1 MB.")
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 1 MB.")
     try:
         message = BytesParser(policy=policy.default).parsebytes(content)
         raw = message.as_string(policy=policy.default)
@@ -303,16 +355,94 @@ async def analyse_file(file: UploadFile = File(...)) -> dict[str, Any]:
     return result
 
 
+@app.post("/api/analyses/{analysis_id}/action")
+def log_analyst_action(analysis_id: int, payload: AnalystActionRequest) -> dict[str, Any]:
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with connect_db() as conn:
+        cur = conn.execute("SELECT id, recommended_action FROM analyses WHERE id = ?", (analysis_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Analysis record not found.")
+
+        conn.execute(
+            """UPDATE analyses
+               SET analyst_action = ?, analyst_notes = ?, action_timestamp = ?, analyst_name = ?
+               WHERE id = ?""",
+            (payload.action, payload.notes, now_iso, payload.analyst_name, analysis_id),
+        )
+
+    is_override = (payload.action != row["recommended_action"])
+
+    return {
+        "id": analysis_id,
+        "recommended_action": row["recommended_action"],
+        "analyst_action": payload.action,
+        "is_override": is_override,
+        "analyst_notes": payload.notes,
+        "analyst_name": payload.analyst_name,
+        "action_timestamp": now_iso,
+        "message": "Analyst override logged to audit trail" if is_override else "Analyst confirmed recommendation",
+    }
+
+
 @app.get("/api/history")
 def history(limit: int = 20) -> dict[str, Any]:
     limit = max(1, min(limit, 100))
     with connect_db() as conn:
         rows = conn.execute(
-            """SELECT id, created_at, sender, subject, risk_score, verdict
+            """SELECT id, created_at, sender, subject, risk_score, rule_score, ml_score,
+                      reputation_score, recommended_action, analyst_action, analyst_notes, action_timestamp
                FROM analyses ORDER BY id DESC LIMIT ?""",
             (limit,),
         ).fetchall()
     return {"items": [dict(row) for row in rows]}
+
+
+@app.get("/api/demo-samples")
+def demo_samples() -> dict[str, list[dict[str, str]]]:
+    return {
+        "samples": [
+            {
+                "id": "sample-quarantine",
+                "label": "1. Urgent Payroll Harvest (High Risk)",
+                "expected": "QUARANTINE",
+                "text": (
+                    "From: hr-support@payroll-portal-auth.live\n"
+                    "Subject: Immediate Action Required: Confirm Direct Deposit Details\n\n"
+                    "Your monthly payroll deposit has been temporarily frozen due to inconsistent banking details. "
+                    "You must login to verify your identity and submit your credentials within 24 hours to prevent "
+                    "payment cancellation.\n\n"
+                    "Click here to update your direct deposit: https://secure-login-microsoft.xyz/auth\n"
+                ),
+            },
+            {
+                "id": "sample-review",
+                "label": "2. External Vendor Invoice (Needs Review)",
+                "expected": "REVIEW",
+                "text": (
+                    "From: accounts@partner-consulting.org\n"
+                    "Subject: Q3 Consulting Services Invoice #8492\n\n"
+                    "Hello team,\n\n"
+                    "Attached is the itemized invoice for September deliverable milestones. "
+                    "Please review the hours logged and process payment per net-30 terms.\n\n"
+                    "Project tracker: https://partner-consulting.org/portal/invoices\n"
+                ),
+            },
+            {
+                "id": "sample-allow",
+                "label": "3. Internal Team All-Hands (Lower Risk)",
+                "expected": "ALLOW",
+                "text": (
+                    "From: communications@internal-company.com\n"
+                    "Subject: Monthly All-Hands Meeting Agenda - October\n\n"
+                    "Hi everyone,\n\n"
+                    "Join us this Thursday at 3 PM for our monthly engineering town hall. "
+                    "We will discuss product milestones, recent customer feedback, and quarterly targets.\n\n"
+                    "See you all there,\nInternal Comms Team"
+                ),
+            },
+        ]
+    }
 
 
 @app.delete("/api/history")
