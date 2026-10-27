@@ -208,21 +208,22 @@ def analyse(raw: str) -> dict[str, Any]:
                 "A mismatch can be legitimate, but it is worth checking whether the link belongs to the organisation the email claims to represent.",
             )
 
-    # Preserve the rule score and add an experimental ML estimate. The combined
+       # Preserve the rule score and add an experimental ML estimate. The combined
     # score is a transparent blend, not a calibrated probability.
     rule_score = min(100, score)
-ml_result = predict_email(parsed["subject"], parsed["body"] or parsed["raw"])
+    ml_result = predict_email(parsed["subject"], parsed["body"] or parsed["raw"])
 
-combined_score = round(
-    0.55 * ml_result["phishing_probability"]
-    + 0.45 * rule_score
-)
+    combined_score = round(
+        0.55 * ml_result["phishing_probability"]
+        + 0.45 * rule_score
+    )
 
-# Escalate emails with multiple independent warning indicators.
-if len(indicators) >= 3 and rule_score >= 40:
-    combined_score = max(combined_score, 60)
+    # Escalate emails with multiple independent warning indicators.
+    if len(indicators) >= 3 and rule_score >= 40:
+        combined_score = max(combined_score, 60)
 
-score = min(100, combined_score)
+    score = min(100, combined_score)
+
     if score >= 60:
         verdict, action = "High risk", "Quarantine"
     elif score >= 25:
