@@ -1,5 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect x="4" y="4" width="56" height="56" rx="8" fill="#172632"/>
-  <path d="M32 12 48 18v12c0 11-7 18-16 23-9-5-16-12-16-23V18z" fill="none" stroke="#dbe5eb" stroke-width="3"/>
-  <path d="m23 32 6 6 12-13" fill="none" stroke="#8cae9e" stroke-width="3.5" stroke-linecap="square" stroke-linejoin="miter"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="shieldGrad" x1="4" y1="4" x2="28" y2="28" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#10b981" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <filter id="cyberGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#10b981" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  <!-- Cyber Background Plate -->
+  <rect width="32" height="32" rx="6" fill="#0a0f1d"/>
+  <rect width="32" height="32" rx="6" stroke="#10b981" stroke-width="1" stroke-opacity="0.3"/>
+  <!-- Shield Path -->
+  <path d="M16 5L7 9V16C7 21.5 10.8 26.6 16 28C21.2 26.6 25 21.5 25 16V9L16 5Z" 
+        fill="url(#shieldGrad)" 
+        filter="url(#cyberGlow)"/>
+  <!-- Inner Security Checkmark -->
+  <path d="M12 16.5L14.8 19.3L20 13.5" 
+        stroke="#ffffff" 
+        stroke-width="2.2" 
+        stroke-linecap="round" 
+        stroke-linejoin="round"/>
 </svg>
