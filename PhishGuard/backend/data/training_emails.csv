@@ -59,3 +59,12 @@ legitimate,Quarterly report draft,Please review the draft quarterly report and s
 legitimate,Appointment confirmed,Your appointment is confirmed for 11 AM. Please arrive ten minutes early and bring your appointment card.
 legitimate,Maintenance window,The service maintenance window is scheduled for Sunday from 1 AM to 2 AM. No response is needed.
 legitimate,New colleague introduction,Please welcome our new colleague to the team. Their first week schedule is available on the shared calendar.
+"Security Notice: Unrecognized Device Sign-in Attempt","Our monitoring platform identified an unrecognized sign-in attempt from a non-standard IP. Review your activity log and confirm your credentials promptly to prevent account lockout.","phishing"
+"Urgent Security Alert: Account Suspended Due to Threat","Security operations detected unusual sign-in activity. You must confirm your security settings and authentication details to prevent permanent suspension.","phishing"
+"Shortlisted: Internship Candidate Registration Required","Congratulations on being shortlisted for the internship program. Complete the candidate information form and upload your personal identity details by the end of the day to reserve your interview slot.","phishing"
+"Campus Recruitment: Urgent Registration Required","Your student profile has been selected for the hiring drive. Complete your registration and verify your personal contact info before the portal closes today.","phishing"
+"Storage Limit Exceeded: Synchronization Paused","Your cloud storage allocation has reached maximum quota. Cloud synchronization of documents has been paused. Restore your synchronization and confirm account settings to avoid interruption.","phishing"
+"Action Required: Cloud Quota Exhausted","File backups have been interrupted because your account reached its storage ceiling. Visit the portal to restore synchronization and update storage subscription.","phishing"
+"Weekly Engineering Standup Notes","Here are the summarized discussion notes and pull requests reviewed during our Monday engineering synchronization. Next sprint begins Thursday.","legitimate"
+"University Career Fair Map & Timings","Attached is the floor layout and company booth schedule for tomorrow's annual university campus placement fair in the main auditorium.","legitimate"
+"Quarterly Cloud Infrastructure Cost Summary","AWS and Azure operational infrastructure cost breakdown for Q3 is now available on the internal finance intranet dashboard.","legitimate"

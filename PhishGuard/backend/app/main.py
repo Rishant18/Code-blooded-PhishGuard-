@@ -15,7 +15,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from app.ml_detector import predict_email, train_model
+from app.ml_detector import predict_email, load_model
 from app.reputation import evaluate_reputation, extract_domain
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,7 +24,7 @@ DB_PATH = BASE_DIR / "phishguard.db"
 app = FastAPI(
     title="PhishGuard API",
     description="Explainable email triage backend: Rules + ML + Reputation with human-in-the-loop analyst audit trail.",
-    version="0.2.0",
+    version="0.2.2",
 )
 
 app.add_middleware(
@@ -73,7 +73,6 @@ def init_db() -> None:
                 email_excerpt TEXT NOT NULL
             )
         """)
-        # Run safe migrations in case columns already exist
         existing_cols = [col[1] for col in conn.execute("PRAGMA table_info(analyses)").fetchall()]
         for col, col_type in [
             ("rule_score", "INTEGER NOT NULL DEFAULT 0"),
@@ -92,7 +91,7 @@ def init_db() -> None:
 @app.on_event("startup")
 def startup() -> None:
     init_db()
-    train_model()
+    load_model()
 
 
 def parse_email_text(raw: str) -> dict[str, str]:
@@ -135,9 +134,9 @@ def extract_urls(text: str) -> list[str]:
 
 def analyse(raw: str) -> dict[str, Any]:
     parsed = parse_email_text(raw)
-    text = f"{parsed['subject']}\n{parsed['body']}\n{parsed['raw']}".lower()
+    full_text = f"{parsed['subject']}\n{parsed['body']}\n{parsed['raw']}".lower()
     urls = extract_urls(parsed["body"] + "\n" + parsed["raw"])
-    
+
     rule_indicators: list[dict[str, Any]] = []
     rule_points = 0
 
@@ -154,76 +153,103 @@ def analyse(raw: str) -> dict[str, Any]:
         })
         rule_points += points
 
-    # --- Pillar 1: Heuristic Rule Checks ---
-    urgency_terms = [
-        "urgent", "immediately", "act now", "within 24 hours", "account suspended",
-        "verify your account", "unusual activity", "final warning", "limited time",
-    ]
-    matched_urgency = next((term for term in urgency_terms if term in text), None)
-    if matched_urgency:
+    # --- 1. Broadened Urgency Heuristic ---
+    urgency_pattern = (
+        r"(?i)\b(urgent|immediately|act now|action required|promptly|by the end of the day|"
+        r"within \d+ (?:hours?|days?)|account (?:will be )?suspended|disabled|unusual activity|"
+        r"final notice|final warning|limited time|expire(?:s|d)? today|avoid interruption|"
+        r"prevent unauthorized access|reserve your slot)\b"
+    )
+    urgency_match = re.search(urgency_pattern, full_text)
+    if urgency_match:
         add_rule(
-            "urgency", "Urgent or coercive pressure language", "medium", 25,
-            f"Matched phrase: “{matched_urgency}”",
-            "Coercive urgency pressures recipients to react quickly without verifying authenticity.",
+            "urgency", "Urgent or pressure-driven call-to-action", "medium", 25,
+            f"Matched phrase: “{urgency_match.group(0)}”",
+            "Call-to-action urgency pressures recipients to react quickly without independent verification.",
         )
 
-    credential_terms = ["password", "login", "sign in", "verify your identity", "credentials", "one-time password", "otp"]
-    matched_credential = next((term for term in credential_terms if term in text), None)
-    if matched_credential:
+    # --- 2. Broadened Credential & Personal Data Harvesting Heuristic ---
+    harvest_pattern = (
+        r"(?i)\b(password|passcode|login|log in|sign[ -]in|verify your identity|confirm your credentials|"
+        r"credentials|one-time password|otp|restore your permissions|confirm (?:your )?security settings|"
+        r"confirm (?:your )?account settings|candidate information form|candidate details|registration form)\b"
+    )
+    harvest_match = re.search(harvest_pattern, full_text)
+    if harvest_match:
         add_rule(
-            "credentials", "Credential solicitation detected", "high", 30,
-            f"Matched term: “{matched_credential}”",
-            "Direct solicitation of account access credentials or session tokens.",
+            "harvesting", "Credential or personal data harvesting solicitation", "high", 30,
+            f"Matched term: “{harvest_match.group(0)}”",
+            "Direct solicitation of user credentials, personal registration data, or security configurations.",
         )
 
-    financial_terms = ["gift card", "wire transfer", "payment overdue", "bank details", "update billing", "direct deposit"]
-    matched_financial = next((term for term in financial_terms if term in text), None)
-    if matched_financial:
+    # --- 3. Broadened Financial & Impersonation Lure Heuristic ---
+    financial_pattern = (
+        r"(?i)\b(gift card|wire transfer|payment overdue|bank(?:ing)? (?:details|information)|"
+        r"update billing|direct deposit|salary payment|payroll profile|synchronization (?:has been )?paused|"
+        r"storage limit reached|quota exhausted)\b"
+    )
+    fin_match = re.search(financial_pattern, full_text)
+    if fin_match:
         add_rule(
-            "financial", "Financial diversion or payment lure", "high", 30,
-            f"Matched term: “{matched_financial}”",
-            "Requests to modify banking, payroll routing, or make non-standard fund transfers.",
+            "lure_pattern", "Resource interruption or financial diversion lure", "high", 30,
+            f"Matched term: “{fin_match.group(0)}”",
+            "Simulates system service interruption, cloud quota suspension, or banking modifications.",
         )
 
-    # Sender vs Link Domain Mismatch Check
+    # --- 4. Sender vs Link Domain Mismatch Check ---
     sender_domain = extract_domain(parsed["sender"]) if parsed["sender"] else ""
     url_domains = [extract_domain(u) for u in urls if extract_domain(u)]
-    
+
     if sender_domain and url_domains:
         mismatched = [d for d in url_domains if not (d == sender_domain or d.endswith("." + sender_domain) or sender_domain.endswith("." + d))]
         if mismatched:
             add_rule(
-                "domain_mismatch", "Sender and destination domain mismatch", "medium", 25,
+                "domain_mismatch", "Sender and destination domain mismatch", "high", 30,
                 f"Sender domain '{sender_domain}' differs from destination '{mismatched[0]}'",
-                "The email originates from one organization domain while redirecting users to an unrelated domain.",
+                "The email originates from one organization domain while redirecting users to an external host.",
             )
+
+    # --- 5. Insecure HTTP Link Check ---
+    insecure_urls = [u for u in urls if u.lower().startswith("http://")]
+    if insecure_urls:
+        add_rule(
+            "insecure_transport", "Unencrypted HTTP destination link", "medium", 20,
+            f"Insecure link found: {insecure_urls[0]}",
+            "Modern enterprise platforms enforce HTTPS. Plain HTTP links requesting actions indicate malicious intent.",
+        )
 
     rule_score = min(100, rule_points)
 
-    # --- Pillar 2: Explainable Machine Learning Model ---
+    # --- Pillar 2: ML Model Inference ---
     ml_result = predict_email(parsed["subject"], parsed["body"] or parsed["raw"])
     ml_score = ml_result["phishing_probability"]
 
-    # --- Pillar 3: Reputation & Threat Intelligence ---
+    # --- Pillar 3: Reputation & Threat Intel ---
     rep_result = evaluate_reputation(sender_domain, urls)
     reputation_score = rep_result["reputation_score"]
 
-    # --- Hybrid Score Blend ---
-    # Formula: 35% Rules + 35% ML + 30% Threat Intel
-    hybrid_score = round(
-        (0.35 * rule_score) +
-        (0.35 * ml_score) +
-        (0.30 * reputation_score)
-    )
+    # Dynamic Weighting Blend:
+    if reputation_score > 0:
+        hybrid_score = round((0.35 * rule_score) + (0.35 * ml_score) + (0.30 * reputation_score))
+    else:
+        # Rules and ML share equal weight when no reputation intel is available
+        hybrid_score = round((0.50 * rule_score) + (0.50 * ml_score))
 
-    # High-confidence escalation rule:
-    # If threat-intel flagged a known malicious host or IP, escalate score to at least 75
+    # --- Escalation Logic ---
     if reputation_score >= 50:
-        hybrid_score = max(hybrid_score, 75)
+        hybrid_score = max(hybrid_score, 80)
+
+    # High-confidence multi-heuristic escalation:
+    # Domain mismatch combined with harvesting, urgency, or insecure links
+    critical_rules = [ind["key"] for ind in rule_indicators]
+    if "domain_mismatch" in critical_rules and ("harvesting" in critical_rules or "lure_pattern" in critical_rules):
+        hybrid_score = max(hybrid_score, 74)
+
+    if len(rule_indicators) >= 3 and rule_score >= 55:
+        hybrid_score = max(hybrid_score, 72)
 
     final_score = min(100, max(0, hybrid_score))
 
-    # Triage Decision Thresholds
     if final_score >= 60:
         action = "QUARANTINE"
         verdict = "High Risk"
@@ -234,7 +260,6 @@ def analyse(raw: str) -> dict[str, Any]:
         action = "ALLOW"
         verdict = "Lower Risk"
 
-    # Combine all evidence into one unified auditable list
     all_indicators = list(rule_indicators)
     for ind in rep_result["indicators"]:
         all_indicators.append({
@@ -244,7 +269,7 @@ def analyse(raw: str) -> dict[str, Any]:
             "severity": ind["severity"],
             "points": ind["impact"],
             "evidence": ind["finding"],
-            "explanation": "Signal flagged from domain heuristics or local threat intelligence blocklist.",
+            "explanation": "Signal flagged from domain heuristics or threat intelligence blocklist.",
         })
 
     summary = (
@@ -332,7 +357,6 @@ async def analyse_file(file: UploadFile = File(...)) -> dict[str, Any]:
 
 @app.post("/api/analyses/{analysis_id}/action")
 def log_analyst_action(analysis_id: int, payload: AnalystActionRequest) -> dict[str, Any]:
-    """Records human-in-the-loop analyst decisions and overrides with audit timestamp."""
     now_iso = datetime.now(timezone.utc).isoformat()
     with connect_db() as conn:
         cur = conn.execute("SELECT id, recommended_action FROM analyses WHERE id = ?", (analysis_id,))
@@ -376,7 +400,6 @@ def history(limit: int = 20) -> dict[str, Any]:
 
 @app.get("/api/demo-samples")
 def demo_samples() -> dict[str, list[dict[str, str]]]:
-    """Provides preloaded demo emails for seamless live hackathon presentations."""
     return {
         "samples": [
             {
