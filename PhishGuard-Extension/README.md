@@ -16,7 +16,7 @@ A browser extension port of **PhishGuard**, an Explainable Phishing Triage Engin
 
 ## Download PhishGuard
 
-**[Download PhishGuard Chrome Extension (ZIP)](YOUR_RELEASE_ASSET_LINK)**
+**[Download PhishGuard Chrome Extension (ZIP)](https://github.com/Rishant18/Code-blooded-PhishGuard-/releases/download/v1.0.0/PhishGuard-Extension.zip)**
 
 Alternatively, visit the [PhishGuard GitHub Releases page](https://github.com/Rishant18/Code-blooded-PhishGuard-/releases) and download the latest extension ZIP under **Assets**.
 
